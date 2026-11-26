@@ -37,7 +37,10 @@ abstract interface class RoomTransport implements HistoryTransport {
 
 abstract interface class DirectTransport implements HistoryTransport {
   Future<int> myNumber();
-  Future<bool> subscriberExists(int number);
+  Future<List<int>> contacts();
+  Future<String> createInvite();
+  Future<int> previewInvite(String token);
+  Future<int> acceptInvite(String token);
   Future<void> sendTo(int number, String token, String text);
 }
 
@@ -63,6 +66,7 @@ abstract class SignalRHistory implements HistoryTransport {
         .build();
     _hub = hub;
     hub.on('MessagesAvailable', (_) => onMessage());
+    if (credential != null) hub.on('ContactsChanged', (_) => onMessage());
     hub.onclose(({error}) => onClose());
     await hub.start()?.timeout(const Duration(seconds: 12));
   }
@@ -110,8 +114,17 @@ class SignalRDirect extends SignalRHistory implements DirectTransport {
   @override
   Future<int> myNumber() async => await _request('MyNumber') as int;
   @override
-  Future<bool> subscriberExists(int number) async =>
-      await _request('SubscriberExists', [number]) as bool;
+  Future<List<int>> contacts() async =>
+      (await _request('Contacts') as List).cast<int>();
+  @override
+  Future<String> createInvite() async =>
+      await _request('CreateInvite') as String;
+  @override
+  Future<int> previewInvite(String token) async =>
+      await _request('PreviewInvite', [token]) as int;
+  @override
+  Future<int> acceptInvite(String token) async =>
+      await _request('AcceptInvite', [token]) as int;
   @override
   Future<void> sendTo(int number, String token, String text) async {
     await _request('SendTo', [number, token, text]);

@@ -15,6 +15,33 @@ public class DirectDeliveryTests
     private static string Secret() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
     [Fact, Trait("Category", "Live")]
+    public async Task Replaced_QR_is_invalid_and_only_one_concurrent_scanner_can_claim_its_replacement()
+    {
+        var url = new Uri(new Uri(Environment.GetEnvironmentVariable("CHAT_TEST_URL")!), "/direct").ToString();
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var ct = limit.Token;
+        await using var owner = Connect(url, Secret());
+        await using var first = Connect(url, Secret());
+        await using var second = Connect(url, Secret());
+        await Task.WhenAll(owner.StartAsync(ct), first.StartAsync(ct), second.StartAsync(ct));
+        var old = await owner.InvokeAsync<string>("CreateInvite", ct);
+        var current = await owner.InvokeAsync<string>("CreateInvite", ct);
+        await Assert.ThrowsAsync<HubException>(() => first.InvokeAsync<long>("AcceptInvite", old, ct));
+        async Task<bool> TryClaim(HubConnection scanner)
+        {
+            try { await scanner.InvokeAsync<long>("AcceptInvite", current, ct); return true; }
+            catch (HubException) { return false; }
+        }
+        var claims = await Task.WhenAll(TryClaim(first), TryClaim(second));
+        Assert.Single(claims, accepted => accepted);
+        var winner = claims[0] ? first : second;
+        var loser = claims[0] ? second : first;
+        var winnerNumber = await winner.InvokeAsync<long>("MyNumber", ct);
+        Assert.Equal(new[] { winnerNumber }, await owner.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Empty(await loser.InvokeAsync<long[]>("Contacts", ct));
+    }
+
+    [Fact, Trait("Category", "Live")]
     public async Task Direct_messages_and_notifications_are_visible_only_to_the_two_participants()
     {
         var roomUrl = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
@@ -35,7 +62,27 @@ public class DirectDeliveryTests
         var alice = await a.InvokeAsync<long>("MyNumber", ct);
         var bob = await b.InvokeAsync<long>("MyNumber", ct);
         Assert.NotEqual(alice, bob);
-        Assert.True(await a.InvokeAsync<bool>("SubscriberExists", bob, ct));
+        Assert.Empty(await a.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Empty(await b.InvokeAsync<long[]>("Contacts", ct));
+        await Assert.ThrowsAsync<HubException>(() => a.InvokeAsync<long>("SendTo", bob, Guid.NewGuid(), "before QR", ct));
+        var aliceChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bobChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        a.On("ContactsChanged", () => aliceChanged.TrySetResult());
+        b.On("ContactsChanged", () => bobChanged.TrySetResult());
+        c.On("ContactsChanged", () => leaked.TrySetResult());
+        var tokenQr = await a.InvokeAsync<string>("CreateInvite", ct);
+        Assert.Equal(alice, await b.InvokeAsync<long>("PreviewInvite", tokenQr, ct));
+        await Assert.ThrowsAsync<HubException>(() => a.InvokeAsync<long>("AcceptInvite", tokenQr, ct));
+        await Assert.ThrowsAsync<HubException>(() => b.InvokeAsync<long>("AcceptInvite", alice.ToString(), ct));
+        Assert.Empty(await b.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(alice, await b.InvokeAsync<long>("AcceptInvite", tokenQr, ct));
+        await Task.WhenAll(aliceChanged.Task, bobChanged.Task).WaitAsync(ct);
+        Assert.Equal(new[] { bob }, await a.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(new[] { alice }, await b.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Empty(await b.InvokeAsync<Row[]>("History", 0L, ct));
+        Assert.Equal(alice, await b.InvokeAsync<long>("AcceptInvite", tokenQr, ct));
+        await Assert.ThrowsAsync<HubException>(() => c.InvokeAsync<long>("AcceptInvite", tokenQr, ct));
+        Assert.Empty(await c.InvokeAsync<long[]>("Contacts", ct));
         var token = Guid.NewGuid();
         var body = $"Личное {token}";
         var id = await a.InvokeAsync<long>("SendTo", bob, token, body, ct);

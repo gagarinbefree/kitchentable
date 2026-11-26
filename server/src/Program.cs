@@ -11,6 +11,8 @@ var connection = builder.Configuration.GetConnectionString("Chat")
 builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connection));
 builder.Services.AddSingleton<PostgresMessages>();
 builder.Services.AddSingleton<PostgresDirectMessages>();
+builder.Services.AddSingleton<PostgresContacts>();
+builder.Services.AddSingleton<IContactStore>(sp => sp.GetRequiredService<PostgresContacts>());
 builder.Services.AddSingleton<IDirectStore>(sp => sp.GetRequiredService<PostgresDirectMessages>());
 builder.Services.AddAuthentication(SubscriberAuthentication.Method)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, SubscriberAuthentication>(
@@ -29,6 +31,7 @@ builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("diagno
 var app = builder.Build();
 await app.Services.GetRequiredService<PostgresMessages>().Initialize(app.Lifetime.ApplicationStopping);
 await app.Services.GetRequiredService<PostgresDirectMessages>().Initialize(app.Lifetime.ApplicationStopping);
+await app.Services.GetRequiredService<PostgresContacts>().Initialize(app.Lifetime.ApplicationStopping);
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();

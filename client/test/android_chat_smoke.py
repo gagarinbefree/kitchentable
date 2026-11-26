@@ -1,4 +1,4 @@
-"""Run on Linux with two Android devices or two profiles on one emulator."""
+"""Verify messaging between two Android installations already paired by QR."""
 import argparse
 import os
 import re
@@ -109,12 +109,6 @@ def click(device, text):
     tap(device, wait_for(device, lambda n: text in label(n) and n.get("enabled") == "true", text))
 
 
-def open_new(device, peer):
-    enter(device, "Номер абонента", peer)
-    click(device, "Открыть")
-    displayed(device, f"Абонент {peer}")
-
-
 def open_existing(device, peer):
     click(device, f"Абонент {peer}")
     wait_for(device, lambda n: n.get("class") == "android.widget.EditText", "message composer")
@@ -162,7 +156,7 @@ if __name__ == "__main__":
         tag = uuid.uuid4().hex[:7]
         first, reply, missed = (f"KT-{tag}-{word}" for word in ("hello", "reply", "back"))
         show(a, owner)
-        open_new(a, bob)
+        open_existing(a, bob)
         send(a, first)
         show(b, peer_user)
         displayed(b, first)

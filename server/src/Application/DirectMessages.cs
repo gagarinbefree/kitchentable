@@ -6,13 +6,11 @@ namespace KitchenTable.Application;
 public sealed record DirectRow(long Id, long Sender, long Recipient, string Body, DateTimeOffset SentAt);
 public sealed record SendDirect(long Sender, long Recipient, Guid Token, string? Text) : IRequest<long>;
 public sealed record ReadInbox(long Owner, long After) : IRequest<List<DirectRow>>;
-public sealed record FindSubscriber(long Number) : IRequest<bool>;
 
 public interface IDirectStore
 {
     Task<long> Append(PersonalMessage message, CancellationToken ct);
     Task<List<DirectRow>> Inbox(long owner, long after, CancellationToken ct);
-    Task<bool> Exists(long number, CancellationToken ct);
 }
 
 public sealed class SendDirectHandler(IDirectStore store) : IRequestHandler<SendDirect, long>
@@ -25,9 +23,4 @@ public sealed class ReadInboxHandler(IDirectStore store) : IRequestHandler<ReadI
 {
     public Task<List<DirectRow>> Handle(ReadInbox request, CancellationToken ct) =>
         request.After < 0 ? throw new MessageRuleException("Invalid cursor.") : store.Inbox(request.Owner, request.After, ct);
-}
-
-public sealed class FindSubscriberHandler(IDirectStore store) : IRequestHandler<FindSubscriber, bool>
-{
-    public Task<bool> Handle(FindSubscriber request, CancellationToken ct) => store.Exists(request.Number, ct);
 }

@@ -5,6 +5,7 @@ class DirectFake implements DirectTransport {
   final rows = <Message>[];
   late VoidCallback changed;
   final recipients = <int>[];
+  final peers = <int>[];
   @override
   Future<void> connect(VoidCallback onMessage, VoidCallback onClose) async {
     changed = onMessage;
@@ -13,7 +14,18 @@ class DirectFake implements DirectTransport {
   @override
   Future<int> myNumber() async => 100001;
   @override
-  Future<bool> subscriberExists(int number) async => number == 100002;
+  Future<List<int>> contacts() async => List.of(peers);
+  @override
+  Future<String> createInvite() async => 'a' * 64;
+  @override
+  Future<int> previewInvite(String token) async => 100002;
+  @override
+  Future<int> acceptInvite(String token) async {
+    if (!peers.contains(100002)) peers.add(100002);
+    changed();
+    return 100002;
+  }
+
   @override
   Future<List<Message>> history(int after) async =>
       rows.where((m) => m.id > after).toList();

@@ -27,6 +27,7 @@ void main() {
     ]) {
       tester.binding.handleAppLifecycleStateChanged(state);
     }
+    direct.peers.add(100002);
     direct.rows.add(
       Message(
         1,
@@ -61,18 +62,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
       await tester.pumpAndSettle();
       expect(find.text('Мой номер: 100001'), findsOneWidget);
-      await tester.enterText(
-        find.byWidgetPredicate((w) => w is EditableText && !w.readOnly),
-        '999999',
-      );
-      await tester.tap(find.text('Открыть'));
+      expect(find.text('Номер абонента'), findsNothing);
+      expect(find.text('Пока нет абонентов'), findsOneWidget);
+      await tester.tap(find.text('Добавить абонента'));
       await tester.pumpAndSettle();
-      expect(find.text('Абонент не найден'), findsOneWidget);
-      await tester.enterText(
-        find.byWidgetPredicate((w) => w is EditableText && !w.readOnly),
-        '100002',
-      );
-      await tester.tap(find.text('Открыть'));
+      expect(find.text('Сканировать QR'), findsOneWidget);
+      direct.peers.add(100002);
+      direct.changed();
+      await tester.pumpAndSettle();
+      expect(find.text('Абоненты'), findsOneWidget);
+      expect(find.text('Абонент 100002'), findsOneWidget);
+      expect(direct.rows, isEmpty);
+      await tester.tap(find.text('Абонент 100002'));
       await tester.pumpAndSettle();
       expect(find.text('Абонент 100002'), findsOneWidget);
       await tester.enterText(
@@ -83,6 +84,7 @@ void main() {
       await tester.tap(find.text('Отправить'));
       await tester.pumpAndSettle();
       expect(direct.recipients, [100002]);
+      direct.peers.add(100003);
       direct.rows.add(
         Message(
           2,

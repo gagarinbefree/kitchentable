@@ -38,13 +38,6 @@ public sealed class PostgresDirectMessages(NpgsqlDataSource db) : IDirectStore
         return (long)(await cmd.ExecuteScalarAsync(ct))!;
     }
 
-    public async Task<bool> Exists(long number, CancellationToken ct)
-    {
-        await using var cmd = db.CreateCommand("SELECT EXISTS(SELECT 1 FROM subscribers WHERE number=$1)");
-        cmd.Parameters.AddWithValue(number);
-        return (bool)(await cmd.ExecuteScalarAsync(ct))!;
-    }
-
     public async Task<long> Append(PersonalMessage message, CancellationToken ct)
     {
         await using var conn = await db.OpenConnectionAsync(ct);
@@ -54,7 +47,7 @@ public sealed class PostgresDirectMessages(NpgsqlDataSource db) : IDirectStore
         await serial.ExecuteNonQueryAsync(ct);
         await using var cmd = new NpgsqlCommand("""
             INSERT INTO direct_messages(sender,recipient,token,body)
-            SELECT $1,$2,$3,$4 WHERE EXISTS (SELECT 1 FROM subscribers WHERE number=$2)
+            SELECT $1,$2,$3,$4 WHERE EXISTS (SELECT 1 FROM contacts WHERE first_number=LEAST($1,$2) AND second_number=GREATEST($1,$2))
             ON CONFLICT(sender,token) DO NOTHING RETURNING id
             """, conn, tx);
         cmd.Parameters.AddWithValue(message.Sender);
@@ -66,7 +59,7 @@ public sealed class PostgresDirectMessages(NpgsqlDataSource db) : IDirectStore
         {
             cmd.CommandText = "SELECT id FROM direct_messages WHERE sender=$1 AND recipient=$2 AND token=$3 AND body=$4";
             id = (long?)await cmd.ExecuteScalarAsync(ct)
-                ?? throw new MessageRuleException("Unknown recipient or conflicting message token.");
+                ?? throw new MessageRuleException("Contact required or conflicting message token.");
         }
         await tx.CommitAsync(ct);
         return id.Value;

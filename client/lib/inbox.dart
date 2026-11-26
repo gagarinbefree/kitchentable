@@ -3,21 +3,17 @@ import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'chat.dart';
-import 'room_transport.dart';
+import 'contact_invite.dart';
 
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({required this.conversation, super.key});
   final Widget Function(int? peer) conversation;
-
   @override
   ConsumerState<InboxPage> createState() => _InboxPageState();
 }
 
 class _InboxPageState extends ConsumerState<InboxPage> {
-  final _number = TextEditingController();
   late final AppLifecycleListener _lifecycle;
-  String? _error;
-  bool _lookingUp = false;
 
   @override
   void initState() {
@@ -30,57 +26,24 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   @override
   void dispose() {
     _lifecycle.dispose();
-    _number.dispose();
     super.dispose();
   }
 
   void _open(int? peer) {
-    FocusManager.instance.primaryFocus?.unfocus();
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => widget.conversation(peer)));
   }
 
-  Future<void> _lookup() async {
-    if (_lookingUp) return;
-    final peer = int.tryParse(_number.text.trim());
-    final me = ref.read(directChatProvider).number;
-    if (peer == null || peer <= 0 || peer == me) {
-      setState(() => _error = 'Введите номер другого абонента');
-      return;
-    }
-    setState(() {
-      _error = null;
-      _lookingUp = true;
-    });
-    try {
-      final exists = await ref
-          .read(directChatProvider.notifier)
-          .subscriberExists(peer);
-      if (!mounted) return;
-      if (exists) {
-        _number.clear();
-        _open(peer);
-      } else {
-        setState(() => _error = 'Абонент не найден');
-      }
-    } on Exception {
-      if (mounted) setState(() => _error = 'Нет связи с сервером');
-    } finally {
-      if (mounted) setState(() => _lookingUp = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final inbox = ref.watch(directChatProvider);
-    final me = inbox.number;
-    final threads = <int, Message>{};
-    for (final message in inbox.messages.reversed) {
-      final peer = message.sender == me.toString()
+    final previews = <int, String>{};
+    for (final message in inbox.messages) {
+      final peer = message.sender == inbox.number.toString()
           ? message.recipient!
           : int.parse(message.sender);
-      threads.putIfAbsent(peer, () => message);
+      previews[peer] = message.text;
     }
     return Scaffold(
       body: SafeArea(
@@ -93,7 +56,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Сообщения',
+                      'Абоненты',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
@@ -105,59 +68,49 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              if (me != null) SelectableText('Мой номер: $me'),
+              if (inbox.number != null)
+                SelectableText('Мой номер: ${inbox.number}'),
               Text(switch (inbox.connection) {
                 Connection.connecting => 'Подключение…',
                 Connection.online => 'На связи',
                 Connection.offline => 'Соединение потеряно · повторяем',
               }, style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: FTextField(
-                      control: FTextFieldControl.managed(controller: _number),
-                      hint: 'Номер абонента',
-                      keyboardType: TextInputType.number,
-                      maxLines: 1,
-                      onSubmit: (_) => _lookup(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FButton(
-                    mainAxisSize: MainAxisSize.min,
-                    onPress: _lookingUp || inbox.connection != Connection.online
-                        ? null
-                        : _lookup,
-                    child: const Text('Открыть'),
-                  ),
-                ],
+              FButton(
+                onPress: inbox.connection == Connection.online
+                    ? () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const ContactInvitePage(),
+                          ),
+                        );
+                      }
+                    : null,
+                child: const Text('Добавить абонента'),
               ),
-              if (_error != null)
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
               const SizedBox(height: 12),
               const Divider(height: 1),
               Expanded(
-                child: threads.isEmpty
-                    ? const Center(child: Text('Личных сообщений пока нет'))
-                    : ListView(
-                        children: [
-                          for (final thread in threads.entries)
-                            ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text('Абонент ${thread.key}'),
-                              subtitle: Text(
-                                thread.value.text,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onTap: () => _open(thread.key),
-                            ),
-                        ],
+                child: inbox.contacts.isEmpty
+                    ? const Center(child: Text('Пока нет абонентов'))
+                    : ListView.builder(
+                        itemCount: inbox.contacts.length,
+                        itemBuilder: (_, index) {
+                          final peer = inbox.contacts[index];
+                          final preview = previews[peer];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('Абонент $peer'),
+                            subtitle: preview == null
+                                ? null
+                                : Text(
+                                    preview,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                            onTap: () => _open(peer),
+                          );
+                        },
                       ),
               ),
             ],

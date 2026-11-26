@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'room_transport.dart';
@@ -23,7 +24,13 @@ final directChatProvider = NotifierProvider<DirectChat, ChatState>(
 enum Connection { connecting, online, offline }
 
 class ChatState {
-  const ChatState(this.messages, this.connection, [this.number]);
+  const ChatState(
+    this.messages,
+    this.connection, [
+    this.number,
+    this.contacts = const [],
+  ]);
+  final List<int> contacts;
   final int? number;
   final List<Message> messages;
   final Connection connection;
@@ -33,6 +40,7 @@ abstract class MessageFeed<T extends HistoryTransport>
     extends Notifier<ChatState> {
   T get transport;
   Future<int?> identify() async => null;
+  Future<List<int>> loadContacts() async => const [];
   late T _transport;
   Timer? _retry;
   int _session = 0;
@@ -64,7 +72,12 @@ abstract class MessageFeed<T extends HistoryTransport>
       if (!_current(session)) return;
       final number = await identify();
       if (!_current(session)) return;
-      state = ChatState(state.messages, state.connection, number);
+      state = ChatState(
+        state.messages,
+        state.connection,
+        number,
+        state.contacts,
+      );
       _ready = true;
       await _refresh(session);
     } on Exception {
@@ -78,7 +91,12 @@ abstract class MessageFeed<T extends HistoryTransport>
     _ready = false;
     _reading = false;
     _dirty = false;
-    state = ChatState(state.messages, Connection.offline, state.number);
+    state = ChatState(
+      state.messages,
+      Connection.offline,
+      state.number,
+      state.contacts,
+    );
     unawaited(_transport.close());
     _retry = Timer(const Duration(seconds: 2), _connect);
   }
@@ -96,11 +114,16 @@ abstract class MessageFeed<T extends HistoryTransport>
           current.isEmpty ? 0 : current.last.id,
         );
         if (!_current(session)) return;
-        if (page.isNotEmpty || state.connection != Connection.online) {
+        final contacts = await loadContacts();
+        if (!_current(session)) return;
+        if (page.isNotEmpty ||
+            state.connection != Connection.online ||
+            !listEquals(state.contacts, contacts)) {
           state = ChatState(
             [...current, ...page],
             Connection.online,
             state.number,
+            contacts,
           );
         }
         if (page.length == 200) _dirty = true;
@@ -133,8 +156,16 @@ class DirectChat extends MessageFeed<DirectTransport> {
   @override
   Future<int?> identify() => _transport.myNumber();
   Future<void> refreshInbox() => _refresh(_session);
-  Future<bool> subscriberExists(int number) =>
-      _transport.subscriberExists(number);
+  @override
+  Future<List<int>> loadContacts() => _transport.contacts();
+  Future<String> createInvite() => _transport.createInvite();
+  Future<int> previewInvite(String token) => _transport.previewInvite(token);
+  Future<int> acceptInvite(String token) async {
+    final peer = await _transport.acceptInvite(token);
+    await refreshInbox();
+    return peer;
+  }
+
   Future<void> sendTo(int number, String text, String token) =>
       deliver(() => _transport.sendTo(number, token, text));
 }
