@@ -2,6 +2,10 @@ services:
   server:
     image: kitchentable-ci:${GITHUB_SHA:?}
     build:
+      network: default
       labels:
         org.opencontainers.image.source: https://github.com/gagarinbefree/kitchentable
         org.opencontainers.image.revision: ${GITHUB_SHA:?}
+  tests:
+    build:
+      network: default
