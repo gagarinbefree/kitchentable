@@ -3,6 +3,7 @@ using Xunit;
 
 namespace KitchenTable.Tests;
 
+[Trait("Category", "Unit")]
 public class MessageTests
 {
     [Theory]

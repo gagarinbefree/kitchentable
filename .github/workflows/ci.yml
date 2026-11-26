@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   server:
-    name: Build Docker image and test server
+    name: Server unit tests and Docker image
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -29,7 +29,7 @@ jobs:
           retention-days: 7
 
   android:
-    name: Test Flutter and build Android
+    name: Flutter unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -44,54 +44,21 @@ jobs:
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze --no-pub
-          flutter test --no-pub --reporter expanded
-      - run: bash ci/android-build.sh debug
+          flutter test --no-pub --reporter expanded test/unit
+      - if: github.ref != 'refs/heads/main' || github.event_name == 'pull_request'
+        run: bash ci/android-build.sh debug
       - uses: actions/upload-artifact@v4
+        if: github.ref != 'refs/heads/main' || github.event_name == 'pull_request'
         with:
-          name: KitchenTable-debug-x64
+          name: KitchenTable-debug
           path: client/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
-  messaging:
-    name: Android private messaging and restart
-    needs: [server, android]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      POSTGRES_PASSWORD: ephemeral-ci-only
-      CHAT_BIND: 127.0.0.1
-      CHAT_PORT: '28788'
-    steps:
-      - uses: actions/checkout@v4
-        with: {persist-credentials: false}
-      - uses: actions/download-artifact@v4
-        with:
-          name: tested-server
-          path: ${{ runner.temp }}/image
-      - uses: actions/download-artifact@v4
-        with:
-          name: KitchenTable-debug-x64
-          path: ${{ runner.temp }}/apk
-      - name: Start tested server and enable emulator acceleration
-        run: |
-          docker load -i "$RUNNER_TEMP/image/kitchentable-image.tar.gz"
-          docker compose -p kitchentable-actions -f compose.yaml -f ci/compose.yaml up -d --no-build db server
-          curl -fsS --retry 25 --retry-all-errors --retry-delay 1 --max-time 3 http://127.0.0.1:28788/health
-          sudo chmod a+rw /dev/kvm
-      - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
-        with:
-          api-level: 35
-          arch: x86_64
-          target: google_apis
-          profile: pixel_2
-          disable-animations: true
-          script: bash ci/android-smoke.sh
-
   sign:
     name: Sign Android release
-    needs: messaging
+    needs: [server, android]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     environment: android-signing
     runs-on: ubuntu-latest

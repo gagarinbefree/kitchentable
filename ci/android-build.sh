@@ -4,8 +4,7 @@ cd client
 flutter pub get --enforce-lockfile
 case "${1:?expected debug or release}" in
   debug)
-    ORG_GRADLE_PROJECT_kitchenTableCi=true flutter build apk --debug --no-pub \
-        --target-platform android-x64 --dart-define=CHAT_SERVER=http://127.0.0.1:28788
+    flutter build apk --debug --no-pub --dart-define=CHAT_SERVER=https://gagarinbefree.clodocd.com:9443
     ;;
   release)
     umask 077
