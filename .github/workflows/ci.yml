@@ -8,78 +8,102 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: kitchentable-lab
-  cancel-in-progress: false
+  group: kitchentable-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   server:
-    name: Flutter and server tests · Docker build
-    runs-on: [self-hosted, kt-linux]
-    timeout-minutes: 45
+    name: Build Docker image and test server
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
       - run: bash ci/linux-test.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-server
+          path: ${{ runner.temp }}/kitchentable-image.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
   android:
-    name: PVS-Studio · Android build and messaging test
-    needs: server
-    runs-on: [self-hosted, kt-windows]
-    timeout-minutes: 90
-    defaults:
-      run: {shell: pwsh}
+    name: Test Flutter and build Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
-      - name: Analyze C#
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17', cache: gradle}
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with: {flutter-version: '3.50.1', channel: stable, cache: true}
+      - name: Analyze and test Flutter
+        working-directory: client
         run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          dotnet restore server/src/KitchenTable.Server.csproj
-          & 'D:\windows\PVS-Studio\PVS-Studio_Cmd.exe' -t server/src/KitchenTable.Server.csproj -c Release -o "$env:RUNNER_TEMP/KitchenTable.plog"
-      - name: Save PVS report
-        uses: actions/upload-artifact@v4
-        with:
-          name: KitchenTable-PVS
-          path: ${{ runner.temp }}/KitchenTable.plog
-          if-no-files-found: error
-      - run: ./ci/android-build.ps1 Debug
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test --no-pub --reporter expanded
+      - run: bash ci/android-build.sh debug
       - uses: actions/upload-artifact@v4
         with:
           name: KitchenTable-debug-x64
           path: client/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
-      - name: Test private delivery on Linux through the Windows emulator
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          LAB_ADB_KEY: ${{ secrets.LAB_ADB_KEY }}
-          LAB_HOST_KEYS: ${{ secrets.LAB_HOST_KEYS }}
-        run: ./ci/android-smoke.ps1
+          compression-level: 0
+          retention-days: 7
 
-  cleanup:
-    name: Stop isolated test stack
+  messaging:
+    name: Android private messaging and restart
     needs: [server, android]
-    if: always()
-    runs-on: [self-hosted, kt-linux]
-    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: ephemeral-ci-only
+      CHAT_BIND: 127.0.0.1
+      CHAT_PORT: '28788'
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
-      - run: docker --context default compose -p kitchentable-actions -f compose.yaml -f ci/compose.yaml down --volumes --remove-orphans
-        env: {POSTGRES_PASSWORD: cleanup-only}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-server
+          path: ${{ runner.temp }}/image
+      - uses: actions/download-artifact@v4
+        with:
+          name: KitchenTable-debug-x64
+          path: ${{ runner.temp }}/apk
+      - name: Start tested server and enable emulator acceleration
+        run: |
+          docker load -i "$RUNNER_TEMP/image/kitchentable-image.tar.gz"
+          docker compose -p kitchentable-actions -f compose.yaml -f ci/compose.yaml up -d --no-build db server
+          curl -fsS --retry 25 --retry-all-errors --retry-delay 1 --max-time 3 http://127.0.0.1:28788/health
+          sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          script: bash ci/android-smoke.sh
 
   sign:
-    name: Build signed Android APK
-    needs: android
+    name: Sign Android release
+    needs: messaging
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     environment: android-signing
-    runs-on: [self-hosted, kt-windows]
-    timeout-minutes: 80
-    defaults:
-      run: {shell: pwsh}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
-      - run: ./ci/android-build.ps1 Release
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17', cache: gradle}
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with: {flutter-version: '3.50.1', channel: stable, cache: true}
+      - run: bash ci/android-build.sh release
         env:
           KT_STORE_BASE64: ${{ secrets.ANDROID_KEYSTORE }}
           KT_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
@@ -88,11 +112,12 @@ jobs:
           name: KitchenTable-Android
           path: client/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+          compression-level: 0
 
   deploy:
-    name: Publish tested image and deploy HTTPS
-    needs: [sign, cleanup]
-    runs-on: [self-hosted, kt-linux]
+    name: Deploy server over HTTPS
+    needs: sign
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: production
@@ -101,6 +126,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-server
+          path: ${{ runner.temp }}/image
+      - run: docker load -i "$RUNNER_TEMP/image/kitchentable-image.tar.gz"
       - run: bash ci/deploy.sh
         env:
           GH_TOKEN: ${{ github.token }}
