@@ -1,0 +1,130 @@
+name: Test, build and deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: kitchentable-lab
+  cancel-in-progress: false
+
+jobs:
+  server:
+    name: Flutter and server tests · Docker build
+    runs-on: [self-hosted, kt-linux]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - run: bash ci/linux-test.sh
+
+  android:
+    name: PVS-Studio · Android build and messaging test
+    needs: server
+    runs-on: [self-hosted, kt-windows]
+    timeout-minutes: 90
+    defaults:
+      run: {shell: pwsh}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Analyze C#
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet restore server/src/KitchenTable.Server.csproj
+          & 'D:\windows\PVS-Studio\PVS-Studio_Cmd.exe' -t server/src/KitchenTable.Server.csproj -c Release -o "$env:RUNNER_TEMP/KitchenTable.plog"
+      - name: Save PVS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: KitchenTable-PVS
+          path: ${{ runner.temp }}/KitchenTable.plog
+          if-no-files-found: error
+      - run: ./ci/android-build.ps1 Debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KitchenTable-debug-x64
+          path: client/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+      - name: Test private delivery on Linux through the Windows emulator
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          LAB_ADB_KEY: ${{ secrets.LAB_ADB_KEY }}
+          LAB_HOST_KEYS: ${{ secrets.LAB_HOST_KEYS }}
+        run: ./ci/android-smoke.ps1
+
+  cleanup:
+    name: Stop isolated test stack
+    needs: [server, android]
+    if: always()
+    runs-on: [self-hosted, kt-linux]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - run: docker --context default compose -p kitchentable-actions -f compose.yaml -f ci/compose.yaml down --volumes --remove-orphans
+        env: {POSTGRES_PASSWORD: cleanup-only}
+
+  sign:
+    name: Build signed Android APK
+    needs: android
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: android-signing
+    runs-on: [self-hosted, kt-windows]
+    timeout-minutes: 80
+    defaults:
+      run: {shell: pwsh}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - run: ./ci/android-build.ps1 Release
+        env:
+          KT_STORE_BASE64: ${{ secrets.ANDROID_KEYSTORE }}
+          KT_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KitchenTable-Android
+          path: client/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  deploy:
+    name: Publish tested image and deploy HTTPS
+    needs: [sign, cleanup]
+    runs-on: [self-hosted, kt-linux]
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://gagarinbefree.clodocd.com:9443/health
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - run: bash ci/deploy.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.DEPLOY_HOST_KEYS }}
+
+  release:
+    name: Publish Android release
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: KitchenTable-Android}
+      - name: Publish signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mv app-release.apk KitchenTable-Android.apk
+          tag="v1.0.$GITHUB_RUN_NUMBER"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" KitchenTable-Android.apk --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" KitchenTable-Android.apk -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "KitchenTable $tag" --generate-notes
+          fi

@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:17.5-bookworm
+    environment:
+      POSTGRES_DB: kitchentable
+      POSTGRES_USER: kitchentable
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - messages:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitchentable"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+    mem_limit: 192m
+    restart: unless-stopped
+  server:
+    image: ${CHAT_IMAGE:?}
+    environment:
+      ConnectionStrings__Chat: Host=db;Database=kitchentable;Username=kitchentable;Password=${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:8787:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: unless-stopped
+volumes:
+  messages:

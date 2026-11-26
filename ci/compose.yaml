@@ -1,0 +1,7 @@
+services:
+  server:
+    image: kitchentable-ci:${GITHUB_SHA:?}
+    build:
+      labels:
+        org.opencontainers.image.source: https://github.com/gagarinbefree/kitchentable
+        org.opencontainers.image.revision: ${GITHUB_SHA:?}

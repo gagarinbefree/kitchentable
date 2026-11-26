@@ -81,3 +81,13 @@ cd C:\vs\kitchentable
 dotnet restore server/src/KitchenTable.Server.csproj
 & 'D:\windows\PVS-Studio\PVS-Studio_Cmd.exe' -t server/src/KitchenTable.Server.csproj -c Release -o server/KitchenTable.plog
 ```
+
+## GitHub Actions и production
+
+Workflow `Test, build and deploy` запускается при push в `main`, при pull request и вручную. На исполнителе `kt-linux` (192.168.31.84) выполняются анализ Dart, тесты Flutter, сборка Docker и интеграционные тесты ASP.NET Core с отдельной PostgreSQL. Для временного стенда используется Compose-проект `kitchentable-actions` и порт 28788.
+
+Исполнитель `kt-windows` запускает PVS-Studio, собирает тестовый APK с отдельным идентификатором приложения и устанавливает его в профили 0 и 10 эмулятора KitchenTablePeer_API35. Эмулятор должен быть запущен на Windows на порту 5554. Сквозной тест переписки выполняется на Linux через временный SSH-туннель. Для PR из внешнего форка GitHub требует одобрения запуска. Сквозной тест с секретом стенда доступен веткам основного репозитория.
+
+Для `main` Windows собирает и подписывает APK для телефонов. Проверенный серверный образ публикуется в GHCR и разворачивается по digest на 157.22.180.167. Nginx обслуживает `https://gagarinbefree.clodocd.com:9443`, включая WebSocket. После проверки `/health` APK публикуется в GitHub Releases. При неудачной проверке нового образа контроллер восстанавливает предыдущий активный образ, если он существует. Данные PostgreSQL хранятся в томе `kitchentable_messages` на production-хосте.
+
+Production Compose, контроллер и конфигурация nginx находятся в `deploy/`. На сервере они устанавливаются администратором. Ключ Actions ограничен запуском контроллера, паролем PostgreSQL управляет сервер. Ключи подписи APK и ключ деплоя хранятся в отдельных окружениях GitHub, доступных для ветки `main`.

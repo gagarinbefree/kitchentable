@@ -7,7 +7,7 @@ import time
 import uuid
 from xml.etree import ElementTree
 
-PACKAGE = "com.example.kitchentable"
+PACKAGE = os.environ.get("KITCHENTABLE_ANDROID_PACKAGE", "com.example.kitchentable")
 ADB = os.environ.get("ADB", "adb")
 
 
@@ -55,7 +55,7 @@ def displayed(device, text):
 
 def foreground(device, user):
     shell(device, "am", "start", "-W", "--user", user, "-a", "android.intent.action.MAIN", "-c",
-          "android.intent.category.LAUNCHER", "-f", "0x10200000", "-n", f"{PACKAGE}/.MainActivity")
+          "android.intent.category.LAUNCHER", "-f", "0x10200000", "-n", f"{PACKAGE}/com.example.kitchentable.MainActivity")
     if user != "current":
         wait_for_profile(device, user)
 
