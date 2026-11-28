@@ -22,6 +22,13 @@ public sealed class DirectHub(ISender mediator) : Hub
         return owner;
     }
 
+    public async Task HideContact(long peer)
+    {
+        var changed = await mediator.Send(new HideContact(MyNumber(), peer), Context.ConnectionAborted);
+        if (changed)
+            await Clients.User(Context.UserIdentifier!).SendAsync("ContactsChanged");
+    }
+
     private async Task<long> Resolve(IRequest<long> request)
     {
         try { return await mediator.Send(request, Context.ConnectionAborted); }

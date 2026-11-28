@@ -61,6 +61,19 @@ public sealed class PostgresDirectMessages(NpgsqlDataSource db) : IDirectStore
             id = (long?)await cmd.ExecuteScalarAsync(ct)
                 ?? throw new MessageRuleException("Contact required or conflicting message token.");
         }
+        else
+        {
+            // Only a newly stored incoming message makes its sender visible again.
+            await using var reveal = new NpgsqlCommand("""
+                UPDATE contacts SET hidden_by_first = hidden_by_first AND first_number<>$2,
+                                    hidden_by_second = hidden_by_second AND second_number<>$2
+                WHERE first_number=LEAST($1,$2) AND second_number=GREATEST($1,$2)
+                  AND ((first_number=$2 AND hidden_by_first) OR (second_number=$2 AND hidden_by_second))
+                """, conn, tx);
+            reveal.Parameters.AddWithValue(message.Sender);
+            reveal.Parameters.AddWithValue(message.Recipient);
+            await reveal.ExecuteNonQueryAsync(ct);
+        }
         await tx.CommitAsync(ct);
         return id.Value;
     }

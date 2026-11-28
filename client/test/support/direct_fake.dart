@@ -27,19 +27,19 @@ class DirectFake implements DirectTransport {
   }
 
   @override
+  Future<void> hideContact(int peer) async {
+    peers.remove(peer);
+    changed();
+  }
+
+  @override
   Future<List<Message>> history(int after) async =>
       rows.where((m) => m.id > after).toList();
   @override
   Future<void> sendTo(int number, String token, String text) async {
     recipients.add(number);
     rows.add(
-      Message(
-        rows.length + 1,
-        100001,
-        text,
-        DateTime(2026),
-        recipient: number,
-      ),
+      Message(rows.length + 1, 100001, text, DateTime(2026), recipient: number),
     );
     changed();
   }

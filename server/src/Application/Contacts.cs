@@ -4,6 +4,7 @@ using MediatR;
 
 namespace KitchenTable.Application;
 
+public sealed record HideContact(long Owner, long Peer) : IRequest<bool>;
 public sealed record ListContacts(long Owner) : IRequest<List<long>>;
 public sealed record CreateContactInvite(long Owner) : IRequest<string>;
 public sealed record PreviewContactInvite(long Scanner, string Token) : IRequest<long>;
@@ -11,6 +12,7 @@ public sealed record AcceptContactInvite(long Scanner, string Token) : IRequest<
 
 public interface IContactStore
 {
+    Task<bool> Hide(long owner, long peer, CancellationToken ct);
     Task<List<long>> List(long owner, CancellationToken ct);
     Task SaveInvite(long owner, byte[] digest, CancellationToken ct);
     Task<long> Preview(long scanner, byte[] digest, CancellationToken ct);
@@ -18,9 +20,12 @@ public interface IContactStore
 }
 
 public sealed class ContactHandler(IContactStore store) :
-    IRequestHandler<ListContacts, List<long>>, IRequestHandler<CreateContactInvite, string>,
+    IRequestHandler<HideContact, bool>, IRequestHandler<ListContacts, List<long>>, IRequestHandler<CreateContactInvite, string>,
     IRequestHandler<PreviewContactInvite, long>, IRequestHandler<AcceptContactInvite, long>
 {
+    public Task<bool> Handle(HideContact request, CancellationToken ct) =>
+        store.Hide(request.Owner, request.Peer, ct);
+
     public Task<List<long>> Handle(ListContacts request, CancellationToken ct) => store.List(request.Owner, ct);
 
     public async Task<string> Handle(CreateContactInvite request, CancellationToken ct)

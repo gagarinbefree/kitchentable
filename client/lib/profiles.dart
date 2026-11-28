@@ -3,6 +3,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_android/shared_preferences_android.dart';
 
+import 'chat.dart';
+
 SharedPreferencesAsync openProfilePreferences() => SharedPreferencesAsync(
   options: const SharedPreferencesAsyncAndroidOptions(
     backend: SharedPreferencesAndroidBackendLibrary.SharedPreferences,
@@ -91,6 +93,53 @@ class _ProfileEditorState extends ConsumerState<ProfileEditor> {
     }
   }
 
+  Future<void> _hideContact() async {
+    final peer = widget.number;
+    if (widget.isMine || peer == null || _saving) return;
+    final label = ref.read(profileNamesProvider)[peer] ?? 'Абонент $peer';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Скрыть абонента?'),
+        content: Text(
+          '«$label» исчезнет только из вашего списка. Переписка сохранится. Следующее входящее сообщение вернёт абонента в список.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Скрыть'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref.read(directChatProvider.notifier).hideContact(peer);
+      if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.pop(context);
+      }
+    } on Exception {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Не удалось скрыть абонента. Проверьте соединение и повторите попытку.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -132,6 +181,18 @@ class _ProfileEditorState extends ConsumerState<ProfileEditor> {
               ),
             ],
           ),
+          if (!widget.isMine && widget.number != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                ),
+                onPressed: _saving ? null : _hideContact,
+                icon: const Icon(Icons.person_remove_outlined),
+                label: const Text('Скрыть из списка'),
+              ),
+            ),
         ],
       ),
     ),

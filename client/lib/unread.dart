@@ -40,7 +40,7 @@ class UnreadLedger extends ChangeNotifier {
   });
 
   // Receive a complete, ordered history after the last page of each sync.
-  void receive(List<Message> history, int owner) {
+  void receive(List<Message> history, int owner, Set<int> contacts) {
     _synced = true;
     final last = history.isEmpty ? 0 : history.last.id;
     if (_owner != owner) {
@@ -51,14 +51,19 @@ class UnreadLedger extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final cleared = _counts.remove(_visiblePeer) != null;
+    final previousCount = _counts.length;
+    _counts.removeWhere(
+      (peer, _) => peer == _visiblePeer || !contacts.contains(peer),
+    );
     if (last <= _cursor) {
-      if (cleared) notifyListeners();
+      if (_counts.length != previousCount) notifyListeners();
       return;
     }
     for (final message in history.reversed) {
       if (message.id <= _cursor) break;
-      if (message.recipient == owner && message.sender != _visiblePeer) {
+      if (message.recipient == owner &&
+          message.sender != _visiblePeer &&
+          contacts.contains(message.sender)) {
         _counts[message.sender] = countFor(message.sender) + 1;
       }
     }

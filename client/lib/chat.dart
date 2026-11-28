@@ -120,7 +120,9 @@ class DirectChat extends Notifier<ChatState> {
         if (page.length == 200) {
           _dirty = true;
         } else {
-          ref.read(unreadProvider).receive(state.messages, state.number!);
+          ref
+              .read(unreadProvider)
+              .receive(state.messages, state.number!, contacts.toSet());
         }
       } while (_dirty);
     } on Exception {
@@ -137,6 +139,12 @@ class DirectChat extends Notifier<ChatState> {
     final peer = await _transport.acceptInvite(token);
     await refreshInbox();
     return peer;
+  }
+
+  Future<void> hideContact(int peer) async {
+    if (!_ready) throw const FormatException('Disconnected');
+    await _transport.hideContact(peer);
+    await refreshInbox();
   }
 
   Future<void> sendTo(int number, String text, String token) async {

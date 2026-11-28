@@ -40,6 +40,7 @@ abstract interface class DirectTransport {
   Future<String> createInvite();
   Future<int> previewInvite(String token);
   Future<int> acceptInvite(String token);
+  Future<void> hideContact(int peer);
   Future<void> sendTo(int number, String token, String text);
 }
 
@@ -108,6 +109,11 @@ class SignalRDirect implements DirectTransport {
   @override
   Future<int> acceptInvite(String token) async =>
       await _request('AcceptInvite', [token]) as int;
+  @override
+  Future<void> hideContact(int peer) async {
+    await _request('HideContact', [peer]);
+  }
+
   @override
   Future<void> sendTo(int number, String token, String text) async {
     await _request('SendTo', [number, token, text]);

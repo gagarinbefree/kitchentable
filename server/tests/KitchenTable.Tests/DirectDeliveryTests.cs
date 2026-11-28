@@ -15,6 +15,51 @@ public class DirectDeliveryTests
     private static string Secret() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
     [Fact, Trait("Category", "Live")]
+    public async Task Hiding_is_private_and_only_a_new_incoming_message_or_fresh_QR_restores_the_contact()
+    {
+        var url = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var ct = limit.Token;
+        await using var a = Connect(url, Secret());
+        var bobKey = Secret();
+        await using var b = Connect(url, bobKey);
+        await using var c = Connect(url, Secret());
+        await Task.WhenAll(a.StartAsync(ct), b.StartAsync(ct), c.StartAsync(ct));
+        var alice = await a.InvokeAsync<long>("MyNumber", ct);
+        var bob = await b.InvokeAsync<long>("MyNumber", ct);
+        var charlie = await c.InvokeAsync<long>("MyNumber", ct);
+        var qr = await a.InvokeAsync<string>("CreateInvite", ct);
+        await b.InvokeAsync<long>("AcceptInvite", qr, ct);
+        await c.InvokeAsync<long>("AcceptInvite", await b.InvokeAsync<string>("CreateInvite", ct), ct);
+        var firstToken = Guid.NewGuid();
+        var first = await a.InvokeAsync<long>("SendTo", bob, firstToken, "before hiding", ct);
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        b.On("ContactsChanged", () => changed.TrySetResult());
+        await b.InvokeAsync("HideContact", alice, ct);
+        await changed.Task.WaitAsync(ct);
+        await b.InvokeAsync("HideContact", alice, ct);
+        Assert.Equal(new[] { bob }, await a.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(new[] { charlie }, await b.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(new[] { bob }, await c.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(first, await a.InvokeAsync<long>("SendTo", bob, firstToken, "before hiding", ct));
+        await b.StopAsync(ct);
+        await b.StartAsync(ct);
+        await b.InvokeAsync<long>("AcceptInvite", qr, ct);
+        Assert.Equal(new[] { charlie }, await b.InvokeAsync<long[]>("Contacts", ct));
+        await b.StopAsync(ct);
+        var second = await a.InvokeAsync<long>("SendTo", bob, Guid.NewGuid(), "after hiding", ct);
+        await b.StartAsync(ct);
+        Assert.Contains(alice, await b.InvokeAsync<long[]>("Contacts", ct));
+        await b.InvokeAsync("HideContact", alice, ct);
+        await a.InvokeAsync<long>("AcceptInvite", await b.InvokeAsync<string>("CreateInvite", ct), ct);
+        Assert.Contains(alice, await b.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Equal(new[] { first, second }, (await b.InvokeAsync<Row[]>("History", 0L, ct)).Select(row => row.Id));
+        await a.InvokeAsync("HideContact", bob, ct);
+        Assert.Empty(await a.InvokeAsync<long[]>("Contacts", ct));
+        Assert.Contains(alice, await b.InvokeAsync<long[]>("Contacts", ct));
+    }
+
+    [Fact, Trait("Category", "Live")]
     public async Task Former_public_hub_is_unavailable()
     {
         var direct = new Uri(Environment.GetEnvironmentVariable("CHAT_TEST_URL")!);
