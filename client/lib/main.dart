@@ -12,6 +12,7 @@ import 'inbox.dart';
 import 'profiles.dart';
 import 'room_transport.dart';
 import 'settings.dart';
+import 'unread.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,9 +37,11 @@ Future<void> main() async {
   final mode = await readThemeMode(prefs);
   final profilePrefs = openProfilePreferences();
   final names = await readProfileNames(profilePrefs);
+  final unread = await loadAndroidUnread();
   runApp(
     ProviderScope(
       overrides: [
+        unreadProvider.overrideWithValue(unread),
         credentialProvider.overrideWithValue(credential),
         themePreferencesProvider.overrideWithValue(prefs),
         initialThemeModeProvider.overrideWithValue(mode),
@@ -85,8 +88,41 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   String? _token;
   String? _lastText;
 
+  late final UnreadLedger _unread;
+  late final AppLifecycleListener _lifecycle;
+  bool _currentRoute = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _unread = ref.read(unreadProvider);
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (_) => _updateVisibility(),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _currentRoute = ModalRoute.isCurrentOf(context) ?? false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateVisibility();
+    });
+  }
+
+  void _updateVisibility() {
+    if (_currentRoute &&
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      _unread.showConversation(widget.peer);
+    } else {
+      _unread.hideConversation(widget.peer);
+    }
+  }
+
   @override
   void dispose() {
+    _lifecycle.dispose();
+    _unread.hideConversation(widget.peer);
     _draft.dispose();
     super.dispose();
   }

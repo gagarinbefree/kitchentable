@@ -117,7 +117,11 @@ def click(device, text):
 
 
 def open_existing(device, peer):
-    click(device, f"Абонент {peer}")
+    edit_label = f"Редактировать имя абонента {peer}"
+    row = wait_for(device, lambda n: n.get("clickable") == "true" and
+                   any(label(child).strip() == edit_label for child in n.findall("node")),
+                   f"conversation with subscriber {peer}")
+    tap(device, row)
     wait_for(device, lambda n: n.get("class") == "android.widget.EditText", "message composer")
 
 
@@ -147,6 +151,10 @@ if __name__ == "__main__":
     def show(device, user):
         if args.peer_user:
             foreground(device, user)
+
+    for device, user in ((a, owner), (b, peer_user)):
+        if int(shell(device, "getprop", "ro.build.version.sdk")) >= 33:
+            shell(device, "pm", "grant", "--user", user, PACKAGE, "android.permission.POST_NOTIFICATIONS")
 
     alice = launch(a, owner, cold=True)
     bob = launch(b, peer_user, cold=True, other_number=alice)

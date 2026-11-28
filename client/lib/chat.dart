@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'room_transport.dart';
+import 'unread.dart';
 
 final credentialProvider = Provider<String>(
   (ref) => throw StateError('Missing device credential'),
@@ -116,7 +117,11 @@ class DirectChat extends Notifier<ChatState> {
             contacts,
           );
         }
-        if (page.length == 200) _dirty = true;
+        if (page.length == 200) {
+          _dirty = true;
+        } else {
+          ref.read(unreadProvider).receive(state.messages, state.number!);
+        }
       } while (_dirty);
     } on Exception {
       _disconnect(session);

@@ -5,6 +5,7 @@ import 'chat.dart';
 import 'contact_invite.dart';
 import 'profiles.dart';
 import 'settings.dart';
+import 'unread.dart';
 
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({required this.conversation, super.key});
@@ -44,6 +45,7 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   Widget build(BuildContext context) {
     final names = ref.watch(profileNamesProvider);
     final inbox = ref.watch(directChatProvider);
+    final unread = ref.watch(unreadProvider);
     final previews = <int, String>{};
     for (final message in inbox.messages) {
       final peer = message.sender == inbox.number
@@ -140,11 +142,30 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: IconButton(
-                              tooltip: 'Редактировать имя абонента $peer',
-                              icon: const Icon(Icons.edit_outlined),
-                              onPressed: () =>
-                                  _edit(ProfileEditor(number: peer)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ListenableBuilder(
+                                  listenable: unread,
+                                  builder: (context, _) {
+                                    final count = unread.countFor(peer);
+                                    return count == 0
+                                        ? const SizedBox.shrink()
+                                        : Semantics(
+                                            label:
+                                                'Непрочитанных сообщений: $count',
+                                            excludeSemantics: true,
+                                            child: Badge.count(count: count),
+                                          );
+                                  },
+                                ),
+                                IconButton(
+                                  tooltip: 'Редактировать имя абонента $peer',
+                                  icon: const Icon(Icons.edit_outlined),
+                                  onPressed: () =>
+                                      _edit(ProfileEditor(number: peer)),
+                                ),
+                              ],
                             ),
                             subtitle: preview == null
                                 ? null
