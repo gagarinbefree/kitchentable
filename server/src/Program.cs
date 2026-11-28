@@ -3,12 +3,12 @@ using KitchenTable.Hubs;
 using KitchenTable.Infrastructure;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 var connection = builder.Configuration.GetConnectionString("Chat")
     ?? throw new InvalidOperationException("Set ConnectionStrings__Chat.");
-builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(connection));
+builder.Services.AddDbContextFactory<ChatDbContext>(options => options.UseNpgsql(connection));
 builder.Services.AddSingleton<PostgresDirectMessages>();
 builder.Services.AddSingleton<PostgresContacts>();
 builder.Services.AddSingleton<IContactStore>(sp => sp.GetRequiredService<PostgresContacts>());
@@ -27,8 +27,11 @@ builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("diagno
     limiter.Window = TimeSpan.FromMinutes(1);
 }));
 var app = builder.Build();
-await app.Services.GetRequiredService<PostgresDirectMessages>().Initialize(app.Lifetime.ApplicationStopping);
-await app.Services.GetRequiredService<PostgresContacts>().Initialize(app.Lifetime.ApplicationStopping);
+await using (var db = await app.Services.GetRequiredService<IDbContextFactory<ChatDbContext>>()
+    .CreateDbContextAsync(app.Lifetime.ApplicationStopping))
+{
+    await ChatDatabase.Migrate(db, app.Lifetime.ApplicationStopping);
+}
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();

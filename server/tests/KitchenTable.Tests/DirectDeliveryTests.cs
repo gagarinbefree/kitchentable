@@ -60,6 +60,38 @@ public class DirectDeliveryTests
     }
 
     [Fact, Trait("Category", "Live")]
+    public async Task Concurrent_connections_keep_one_identity_and_do_not_skip_history_cursors()
+    {
+        var url = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        var ct = limit.Token;
+        var key = Secret();
+        await using var first = Connect(url, key);
+        await using var second = Connect(url, key);
+        await using var receiver = Connect(url, Secret());
+        await Task.WhenAll(first.StartAsync(ct), second.StartAsync(ct), receiver.StartAsync(ct));
+        Assert.Equal(await first.InvokeAsync<long>("MyNumber", ct), await second.InvokeAsync<long>("MyNumber", ct));
+        var recipient = await receiver.InvokeAsync<long>("MyNumber", ct);
+        await first.InvokeAsync<long>("AcceptInvite", await receiver.InvokeAsync<string>("CreateInvite", ct), ct);
+        var retry = Guid.NewGuid();
+        var ids = await Task.WhenAll(first.InvokeAsync<long>("SendTo", recipient, retry, "retry", ct),
+                                     second.InvokeAsync<long>("SendTo", recipient, retry, "retry", ct));
+        Assert.Equal(ids[0], ids[1]);
+        var writers = Task.WhenAll(Enumerable.Range(0, 24).Select(i =>
+            (i % 2 == 0 ? first : second).InvokeAsync<long>("SendTo", recipient, Guid.NewGuid(), $"item {i}", ct)));
+        var seen = new List<long> { ids[0] };
+        async Task Poll()
+        {
+            var rows = await receiver.InvokeAsync<Row[]>("History", seen[^1], ct);
+            seen.AddRange(rows.Select(row => row.Id));
+        }
+        while (!writers.IsCompleted) await Poll();
+        var written = await writers;
+        await Poll();
+        Assert.Equal(written.Order(), seen.Skip(1));
+    }
+
+    [Fact, Trait("Category", "Live")]
     public async Task Former_public_hub_is_unavailable()
     {
         var direct = new Uri(Environment.GetEnvironmentVariable("CHAT_TEST_URL")!);
