@@ -18,6 +18,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        registerUpdates(this, flutterEngine.dartExecutor.binaryMessenger)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             notifications.createNotificationChannel(
                 NotificationChannel(CHANNEL, "Личные сообщения", NotificationManager.IMPORTANCE_LOW)

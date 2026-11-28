@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'update_page.dart';
+
 const _themeKey = 'appearance.spectrumTheme';
 final themePreferencesProvider = Provider((ref) => SharedPreferencesAsync());
 final initialThemeModeProvider = Provider((ref) => ThemeMode.light);
@@ -126,6 +128,14 @@ class SettingsPage extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            ListTile(
+              leading: const Icon(Icons.system_update),
+              title: const Text('Обновления'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const UpdatePage()),
+              ),
+            ),
             SegmentedButton<ThemeMode>(
               segments: const [
                 ButtonSegment(value: ThemeMode.light, label: Text('Светлая')),

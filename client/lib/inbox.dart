@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -6,9 +7,16 @@ import 'contact_invite.dart';
 import 'profiles.dart';
 import 'settings.dart';
 import 'unread.dart';
+import 'update_page.dart';
+import 'updates.dart';
 
 class InboxPage extends ConsumerStatefulWidget {
-  const InboxPage({required this.conversation, super.key});
+  const InboxPage({
+    required this.conversation,
+    this.checkUpdatesOnStart = kReleaseMode,
+    super.key,
+  });
+  final bool checkUpdatesOnStart;
   final Widget Function(int peer) conversation;
   @override
   ConsumerState<InboxPage> createState() => _InboxPageState();
@@ -20,6 +28,11 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.checkUpdatesOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _offerUpdate();
+      });
+    }
     _lifecycle = AppLifecycleListener(
       onResume: () => ref.read(directChatProvider.notifier).refreshInbox(),
     );
@@ -29,6 +42,22 @@ class _InboxPageState extends ConsumerState<InboxPage> {
   void dispose() {
     _lifecycle.dispose();
     super.dispose();
+  }
+
+  Future<void> _offerUpdate() async {
+    try {
+      final check = await ref.read(updatesProvider).check();
+      if (mounted &&
+          check.available != null &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => UpdatePage(initial: check)),
+        );
+      }
+    } on Exception {
+      // The messenger can start offline. Manual checks show a retry action.
+    }
   }
 
   void _open(int peer) {
