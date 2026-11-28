@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -193,20 +192,23 @@ class _ContactInvitePageState extends ConsumerState<ContactInvitePage> {
               ),
             const SizedBox(height: 20),
             if (_peer != null)
-              FButton(
-                onPress: _busy ? null : _accept,
+              FilledButton(
+                onPressed: _busy ? null : _accept,
                 child: const Text('Добавить в контакты'),
               ),
-            if (!_scanning)
-              FButton(
-                variant: _peer == null ? .primary : .outline,
-                onPress: _busy ? null : _scan,
+            if (!_scanning && _peer == null)
+              FilledButton(
+                onPressed: _busy ? null : _scan,
+                child: const Text('Сканировать QR'),
+              )
+            else if (!_scanning)
+              OutlinedButton(
+                onPressed: _busy ? null : _scan,
                 child: const Text('Сканировать QR'),
               ),
             const SizedBox(height: 8),
-            FButton(
-              variant: .outline,
-              onPress: _busy ? null : _generate,
+            OutlinedButton(
+              onPressed: _busy ? null : _generate,
               child: Text(
                 _scanning || _peer != null
                     ? 'Показать мой QR'

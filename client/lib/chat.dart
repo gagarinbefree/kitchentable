@@ -5,12 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'room_transport.dart';
 
-final senderProvider = Provider<String>(
-  (ref) => throw StateError('Missing sender'),
-);
-final transportProvider = Provider<RoomTransport>((ref) => SignalRRoom());
-final chatProvider = NotifierProvider<Chat, ChatState>(Chat.new);
-
 final credentialProvider = Provider<String>(
   (ref) => throw StateError('Missing device credential'),
 );
@@ -36,12 +30,8 @@ class ChatState {
   final Connection connection;
 }
 
-abstract class MessageFeed<T extends HistoryTransport>
-    extends Notifier<ChatState> {
-  T get transport;
-  Future<int?> identify() async => null;
-  Future<List<int>> loadContacts() async => const [];
-  late T _transport;
+class DirectChat extends Notifier<ChatState> {
+  late DirectTransport _transport;
   Timer? _retry;
   int _session = 0;
   bool _ready = false;
@@ -50,7 +40,7 @@ abstract class MessageFeed<T extends HistoryTransport>
 
   @override
   ChatState build() {
-    _transport = transport;
+    _transport = ref.watch(directTransportProvider);
     _retry = Timer(Duration.zero, _connect);
     ref.onDispose(() {
       _session++;
@@ -70,7 +60,7 @@ abstract class MessageFeed<T extends HistoryTransport>
         () => _disconnect(session),
       );
       if (!_current(session)) return;
-      final number = await identify();
+      final number = await _transport.myNumber();
       if (!_current(session)) return;
       state = ChatState(
         state.messages,
@@ -114,7 +104,7 @@ abstract class MessageFeed<T extends HistoryTransport>
           current.isEmpty ? 0 : current.last.id,
         );
         if (!_current(session)) return;
-        final contacts = await loadContacts();
+        final contacts = await _transport.contacts();
         if (!_current(session)) return;
         if (page.isNotEmpty ||
             state.connection != Connection.online ||
@@ -135,29 +125,7 @@ abstract class MessageFeed<T extends HistoryTransport>
     }
   }
 
-  Future<void> deliver(Future<void> Function() action) async {
-    if (!_ready) throw const FormatException('Disconnected');
-    final session = _session;
-    await action();
-    unawaited(_refresh(session));
-  }
-}
-
-class Chat extends MessageFeed<RoomTransport> {
-  @override
-  RoomTransport get transport => ref.watch(transportProvider);
-  Future<void> send(String text, String token) =>
-      deliver(() => _transport.send(ref.read(senderProvider), token, text));
-}
-
-class DirectChat extends MessageFeed<DirectTransport> {
-  @override
-  DirectTransport get transport => ref.watch(directTransportProvider);
-  @override
-  Future<int?> identify() => _transport.myNumber();
   Future<void> refreshInbox() => _refresh(_session);
-  @override
-  Future<List<int>> loadContacts() => _transport.contacts();
   Future<String> createInvite() => _transport.createInvite();
   Future<int> previewInvite(String token) => _transport.previewInvite(token);
   Future<int> acceptInvite(String token) async {
@@ -166,6 +134,10 @@ class DirectChat extends MessageFeed<DirectTransport> {
     return peer;
   }
 
-  Future<void> sendTo(int number, String text, String token) =>
-      deliver(() => _transport.sendTo(number, token, text));
+  Future<void> sendTo(int number, String text, String token) async {
+    if (!_ready) throw const FormatException('Disconnected');
+    final session = _session;
+    await _transport.sendTo(number, token, text);
+    unawaited(_refresh(session));
+  }
 }

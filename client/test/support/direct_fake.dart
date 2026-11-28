@@ -35,7 +35,7 @@ class DirectFake implements DirectTransport {
     rows.add(
       Message(
         rows.length + 1,
-        '100001',
+        100001,
         text,
         DateTime(2026),
         recipient: number,

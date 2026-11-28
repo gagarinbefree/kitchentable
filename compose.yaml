@@ -33,7 +33,7 @@ services:
       network: host
       target: tests
     environment:
-      CHAT_TEST_URL: http://server:8080/chat
+      CHAT_TEST_URL: http://server:8080/direct
     depends_on:
       - server
 volumes:

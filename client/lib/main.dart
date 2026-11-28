@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' show PlatformDispatcher;
 
-import 'package:forui/forui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,7 +9,9 @@ import 'package:uuid/uuid.dart';
 
 import 'chat.dart';
 import 'inbox.dart';
+import 'profiles.dart';
 import 'room_transport.dart';
+import 'settings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,11 +24,6 @@ Future<void> main() async {
     return false;
   };
   final prefs = SharedPreferencesAsync();
-  var sender = await prefs.getString('chat.sender');
-  if (sender == null) {
-    sender = const Uuid().v4();
-    await prefs.setString('chat.sender', sender);
-  }
   var credential = await prefs.getString('direct.deviceKey');
   if (credential == null) {
     final random = Random.secure();
@@ -37,41 +33,47 @@ Future<void> main() async {
     ).join();
     await prefs.setString('direct.deviceKey', credential);
   }
+  final mode = await readThemeMode(prefs);
+  final profilePrefs = openProfilePreferences();
+  final names = await readProfileNames(profilePrefs);
   runApp(
     ProviderScope(
       overrides: [
-        senderProvider.overrideWithValue(sender),
         credentialProvider.overrideWithValue(credential),
+        themePreferencesProvider.overrideWithValue(prefs),
+        initialThemeModeProvider.overrideWithValue(mode),
+        profilePreferencesProvider.overrideWithValue(profilePrefs),
+        initialProfileNamesProvider.overrideWithValue(names),
       ],
       child: const MyApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({this.home, super.key});
   final Widget? home;
   @override
-  Widget build(BuildContext context) {
-    final theme = FTheme.neutral.light.touch;
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
+      theme: spectrumLight,
+      darkTheme: spectrumBlack,
+      themeMode: ref.watch(themeModeProvider),
       title: 'KitchenTable',
       debugShowCheckedModeBanner: false,
-      localizationsDelegates: FLocalizations.localizationsDelegates,
-      supportedLocales: FLocalizations.supportedLocales,
-      theme: theme.toApproximateMaterialTheme(),
-      builder: (context, child) => FTheme(
-        data: theme,
-        child: FTooltipGroup(child: child!),
-      ),
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: {
+        const Locale('en'),
+        ...kMaterialSupportedLanguages.map(Locale.new),
+      },
       home: home ?? InboxPage(conversation: (peer) => ChatPage(peer: peer)),
     );
   }
 }
 
 class ChatPage extends ConsumerStatefulWidget {
-  const ChatPage({this.peer, super.key});
-  final int? peer;
+  const ChatPage({required this.peer, super.key});
+  final int peer;
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
 }
@@ -99,12 +101,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       _sendFailed = false;
     });
     try {
-      final peer = widget.peer;
-      if (peer == null) {
-        await ref.read(chatProvider.notifier).send(text, _token!);
-      } else {
-        await ref.read(directChatProvider.notifier).sendTo(peer, text, _token!);
-      }
+      await ref
+          .read(directChatProvider.notifier)
+          .sendTo(widget.peer, text, _token!);
       if (!mounted) return;
       if (_draft.text.trim() == text) _draft.clear();
       _lastText = null;
@@ -119,19 +118,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final peer = widget.peer;
-    final chat = peer == null
-        ? ref.watch(chatProvider)
-        : ref.watch(directChatProvider);
-    final sender = peer == null
-        ? ref.watch(senderProvider)
-        : chat.number.toString();
-    final messages = peer == null
-        ? chat.messages
-        : chat.messages
-              .where(
-                (row) => row.sender == peer.toString() || row.recipient == peer,
-              )
-              .toList();
+    final names = ref.watch(profileNamesProvider);
+    final peerName = names[peer] ?? 'Абонент $peer';
+    final chat = ref.watch(directChatProvider);
+    final messages = chat.messages
+        .where((row) => row.sender == peer || row.recipient == peer)
+        .toList();
     final colors = Theme.of(context).colorScheme;
     final status = switch (chat.connection) {
       Connection.connecting => 'Подключение…',
@@ -158,18 +150,22 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            peer == null ? 'Общий чат' : 'Абонент $peer',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          Text(
-                            status,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              peerName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            Text(
+                              status,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -191,9 +187,11 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                           itemBuilder: (context, index) {
                             final message =
                                 messages[messages.length - 1 - index];
+                            final mine = message.sender == chat.number;
                             return _Bubble(
                               message: message,
-                              mine: message.sender == sender,
+                              mine: mine,
+                              author: mine ? (names[null] ?? 'Вы') : peerName,
                             );
                           },
                         ),
@@ -213,11 +211,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: FTextField(
-                          control: FTextFieldControl.managed(
-                            controller: _draft,
+                        child: TextField(
+                          controller: _draft,
+                          decoration: const InputDecoration(
+                            hintText: 'Сообщение',
+                            border: OutlineInputBorder(),
+                            counterText: '',
                           ),
-                          hint: 'Сообщение',
                           minLines: 1,
                           maxLines: 5,
                           maxLength: 2000,
@@ -226,11 +226,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                       const SizedBox(width: 8),
                       ValueListenableBuilder<TextEditingValue>(
                         valueListenable: _draft,
-                        builder: (context, value, _) => FButton(
-                          onPress: value.text.trim().isEmpty || _sending
+                        builder: (context, value, _) => FilledButton(
+                          onPressed: value.text.trim().isEmpty || _sending
                               ? null
                               : _send,
-                          mainAxisSize: MainAxisSize.min,
                           child: const Text('Отправить'),
                         ),
                       ),
@@ -247,7 +246,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 }
 
 class _Bubble extends StatelessWidget {
-  const _Bubble({required this.message, required this.mine});
+  const _Bubble({
+    required this.message,
+    required this.mine,
+    required this.author,
+  });
+  final String author;
   final Message message;
   final bool mine;
 
@@ -257,11 +261,7 @@ class _Bubble extends StatelessWidget {
     final time = message.time;
     final clock =
         '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    final author = mine
-        ? 'Вы'
-        : message.recipient == null
-        ? 'Гость ${message.sender.substring(0, 4)}'
-        : 'Абонент ${message.sender}';
+    final ink = mine ? colors.onPrimaryContainer : colors.onSurface;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: FractionallySizedBox(
@@ -276,7 +276,10 @@ class _Bubble extends StatelessWidget {
               color: mine
                   ? colors.primaryContainer
                   : colors.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: mine ? colors.primaryContainer : colors.outlineVariant,
+              ),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -284,10 +287,13 @@ class _Bubble extends StatelessWidget {
               children: [
                 Text(
                   '$author · $clock',
-                  style: Theme.of(context).textTheme.labelSmall,
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: ink),
                 ),
                 const SizedBox(height: 3),
-                SelectionArea(child: Text(message.text)),
+                SelectionArea(
+                  child: Text(message.text, style: TextStyle(color: ink)),
+                ),
               ],
             ),
           ),

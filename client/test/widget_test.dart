@@ -1,77 +1,70 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/widgets.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:kitchentable/chat.dart';
 import 'package:kitchentable/room_transport.dart';
 import 'package:kitchentable/main.dart';
 
-class FakeRoom implements RoomTransport {
-  final rows = <Message>[];
+import 'support/direct_fake.dart';
+
+class RetryTransport extends DirectFake {
   final tokens = <String>[];
-  late VoidCallback notify;
   late VoidCallback drop;
   int connections = 0;
 
   @override
   Future<void> connect(VoidCallback onMessage, VoidCallback onClose) async {
     connections++;
-    notify = onMessage;
     drop = onClose;
+    await super.connect(onMessage, onClose);
   }
 
   @override
-  Future<List<Message>> history(int after) async =>
-      rows.where((row) => row.id > after).toList();
-
-  @override
-  Future<void> send(String author, String token, String text) async {
+  Future<void> sendTo(int number, String token, String text) async {
     tokens.add(token);
     if (tokens.length == 1) throw Exception('ack lost');
-    rows.add(Message(1, author, text, DateTime(2026)));
-    notify();
+    await super.sendTo(number, token, text);
   }
-
-  @override
-  Future<void> close() async {}
 }
 
 void main() {
   testWidgets(
     'retry uses the same token; push and reconnect load missing messages',
     (tester) async {
-      final room = FakeRoom();
+      final direct = RetryTransport();
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [
-            senderProvider.overrideWithValue(
-              'aaaaaaaa-1111-4111-8111-111111111111',
-            ),
-            transportProvider.overrideWithValue(room),
-          ],
-          child: const MyApp(home: ChatPage()),
+          overrides: [directTransportProvider.overrideWithValue(direct)],
+          child: const MyApp(home: ChatPage(peer: 100002)),
         ),
       );
       await tester.pump(const Duration(milliseconds: 10));
       await tester.pumpAndSettle();
       expect(find.text('На связи'), findsOneWidget);
-      await tester.enterText(find.byType(EditableText), 'Привет!');
+      final send = find.widgetWithText(FilledButton, 'Отправить');
+      expect(tester.widget<FilledButton>(send).onPressed, isNull);
+      final composer = find.byType(TextField);
+      expect(tester.widget<TextField>(composer).maxLength, 2000);
+      await tester.enterText(composer, 'Привет!');
       await tester.pump();
-      await tester.tap(find.bySemanticsLabel('Отправить').first);
+      await tester.tap(send);
       await tester.pumpAndSettle();
       expect(
         find.text('Не удалось отправить. Попробуйте ещё раз.'),
         findsOneWidget,
       );
-      await tester.tap(find.bySemanticsLabel('Отправить').first);
+      await tester.tap(send);
       await tester.pumpAndSettle();
-      expect(room.tokens, hasLength(2));
-      expect(room.tokens.first, room.tokens.last);
+      expect(direct.tokens, hasLength(2));
+      expect(direct.tokens.first, direct.tokens.last);
       expect(find.text('Привет!'), findsOneWidget);
-      room.drop();
-      room.rows.add(Message(2, 'bbbbbbbb', 'До встречи', DateTime(2026)));
+      direct.drop();
+      direct.rows.add(
+        Message(2, 100002, 'До встречи', DateTime(2026), recipient: 100001),
+      );
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
-      expect(room.connections, greaterThan(1));
+      expect(direct.connections, greaterThan(1));
       expect(find.text('До встречи'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     },

@@ -30,7 +30,9 @@ def wait_for(device, predicate, description):
     foreground = set()
     while time.monotonic() < deadline:
         try:
-            dump = shell(device, "uiautomator dump /data/local/tmp/kt-screen.xml >/dev/null && cat /data/local/tmp/kt-screen.xml")
+            dump = shell(device, ": > /data/local/tmp/kt-screen.xml && "
+                                 "uiautomator dump /data/local/tmp/kt-screen.xml >/dev/null && "
+                                 "cat /data/local/tmp/kt-screen.xml")
             start = dump.find("<?xml")
             if start < 0:
                 continue
@@ -74,15 +76,20 @@ def stop(device, user):
     shell(device, "am", "force-stop", "--user", user, PACKAGE)
 
 
-def launch(device, user, cold=False):
+def launch(device, user, cold=False, other_number=None):
     shell(device, "input", "keyevent", "KEYCODE_WAKEUP")
     shell(device, "wm", "dismiss-keyguard")
     if cold:
         stop(device, user)
     foreground(device, user)
     displayed(device, "На связи")
-    number_node = displayed(device, "Мой номер:")
-    return re.search(r"Мой номер:\s*(\d+)", label(number_node)).group(1)
+    def own_number(node):
+        match = re.search(r"Мой номер:\s*(\d+)", label(node))
+        return match.group(1) if match else None
+
+    node = wait_for(device, lambda n: own_number(n) not in (None, other_number),
+                    f"subscriber number for profile {user}")
+    return own_number(node)
 
 
 def enter(device, hint, text):
@@ -142,7 +149,7 @@ if __name__ == "__main__":
             foreground(device, user)
 
     alice = launch(a, owner, cold=True)
-    bob = launch(b, peer_user, cold=True)
+    bob = launch(b, peer_user, cold=True, other_number=alice)
     if alice == bob:
         raise AssertionError("The two installations must be separate subscriber accounts")
     print(f"Subscribers: {alice}, {bob}", flush=True)

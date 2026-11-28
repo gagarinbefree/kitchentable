@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace KitchenTable.Domain;
 
 public sealed record PersonalMessage
@@ -15,6 +17,9 @@ public sealed record PersonalMessage
         if (sender <= 0 || recipient <= 0 || sender == recipient)
             throw new MessageRuleException("Choose another subscriber.");
         if (token == Guid.Empty) throw new MessageRuleException("Missing message token.");
-        return new(sender, recipient, token, DraftMessage.NormalizeText(text));
+        var body = text?.Trim();
+        if (string.IsNullOrEmpty(body) || Encoding.UTF8.GetByteCount(body) > 32000)
+            throw new MessageRuleException("Message is empty or too long.");
+        return new(sender, recipient, token, body);
     }
 }

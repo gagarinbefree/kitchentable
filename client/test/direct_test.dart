@@ -31,7 +31,7 @@ void main() {
     direct.rows.add(
       Message(
         1,
-        '100002',
+        100002,
         'Пока приложение свёрнуто',
         DateTime(2026),
         recipient: 100001,
@@ -63,6 +63,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Мой номер: 100001'), findsOneWidget);
       expect(find.text('Номер абонента'), findsNothing);
+      expect(find.text('Общий чат'), findsNothing);
       expect(find.text('Пока нет абонентов'), findsOneWidget);
       await tester.tap(find.text('Добавить абонента'));
       await tester.pumpAndSettle();
@@ -88,7 +89,7 @@ void main() {
       direct.rows.add(
         Message(
           2,
-          '100003',
+          100003,
           'Другая переписка',
           DateTime(2026),
           recipient: 100001,

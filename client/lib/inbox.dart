@@ -1,13 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'chat.dart';
 import 'contact_invite.dart';
+import 'profiles.dart';
+import 'settings.dart';
 
 class InboxPage extends ConsumerStatefulWidget {
   const InboxPage({required this.conversation, super.key});
-  final Widget Function(int? peer) conversation;
+  final Widget Function(int peer) conversation;
   @override
   ConsumerState<InboxPage> createState() => _InboxPageState();
 }
@@ -29,20 +30,25 @@ class _InboxPageState extends ConsumerState<InboxPage> {
     super.dispose();
   }
 
-  void _open(int? peer) {
+  void _open(int peer) {
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => widget.conversation(peer)));
   }
 
+  void _edit(ProfileEditor editor) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => editor));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final names = ref.watch(profileNamesProvider);
     final inbox = ref.watch(directChatProvider);
     final previews = <int, String>{};
     for (final message in inbox.messages) {
-      final peer = message.sender == inbox.number.toString()
-          ? message.recipient!
-          : int.parse(message.sender);
+      final peer = message.sender == inbox.number
+          ? message.recipient
+          : message.sender;
       previews[peer] = message.text;
     }
     return Scaffold(
@@ -60,24 +66,53 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
-                  FButton(
-                    variant: .outline,
-                    mainAxisSize: MainAxisSize.min,
-                    onPress: () => _open(null),
-                    child: const Text('Общий чат'),
+                  const SpectrumStripes(),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    tooltip: 'Настройки',
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const SettingsPage(),
+                      ),
+                    ),
                   ),
                 ],
               ),
-              if (inbox.number != null)
-                SelectableText('Мой номер: ${inbox.number}'),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          names[null] ?? 'Мой профиль',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        if (inbox.number != null)
+                          SelectableText('Мой номер: ${inbox.number}'),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Мой профиль',
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => _edit(
+                      ProfileEditor(number: inbox.number, isMine: true),
+                    ),
+                  ),
+                ],
+              ),
               Text(switch (inbox.connection) {
                 Connection.connecting => 'Подключение…',
                 Connection.online => 'На связи',
                 Connection.offline => 'Соединение потеряно · повторяем',
               }, style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 16),
-              FButton(
-                onPress: inbox.connection == Connection.online
+              FilledButton(
+                onPressed: inbox.connection == Connection.online
                     ? () {
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
@@ -100,7 +135,17 @@ class _InboxPageState extends ConsumerState<InboxPage> {
                           final preview = previews[peer];
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: Text('Абонент $peer'),
+                            title: Text(
+                              names[peer] ?? 'Абонент $peer',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Редактировать имя абонента $peer',
+                              icon: const Icon(Icons.edit_outlined),
+                              onPressed: () =>
+                                  _edit(ProfileEditor(number: peer)),
+                            ),
                             subtitle: preview == null
                                 ? null
                                 : Text(

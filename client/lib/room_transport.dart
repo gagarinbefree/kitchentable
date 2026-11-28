@@ -10,32 +10,31 @@ const chatServer = String.fromEnvironment(
 );
 
 class Message {
-  const Message(this.id, this.sender, this.text, this.time, {this.recipient});
+  const Message(
+    this.id,
+    this.sender,
+    this.text,
+    this.time, {
+    required this.recipient,
+  });
   factory Message.fromJson(Map<String, dynamic> json) => Message(
     json['id'] as int,
-    json['sender'].toString(),
+    json['sender'] as int,
     json['body'] as String,
     DateTime.parse(json['sentAt'] as String).toLocal(),
-    recipient: json['recipient'] as int?,
+    recipient: json['recipient'] as int,
   );
-  final int? recipient;
+  final int recipient;
   final int id;
-  final String sender;
+  final int sender;
   final String text;
   final DateTime time;
 }
 
-abstract interface class HistoryTransport {
+abstract interface class DirectTransport {
   Future<void> connect(VoidCallback onMessage, VoidCallback onClose);
   Future<List<Message>> history(int after);
   Future<void> close();
-}
-
-abstract interface class RoomTransport implements HistoryTransport {
-  Future<void> send(String author, String token, String text);
-}
-
-abstract interface class DirectTransport implements HistoryTransport {
   Future<int> myNumber();
   Future<List<int>> contacts();
   Future<String> createInvite();
@@ -44,29 +43,26 @@ abstract interface class DirectTransport implements HistoryTransport {
   Future<void> sendTo(int number, String token, String text);
 }
 
-abstract class SignalRHistory implements HistoryTransport {
-  SignalRHistory(this.path, [this.credential]);
-  final String path;
-  final String? credential;
+class SignalRDirect implements DirectTransport {
+  SignalRDirect(this.credential);
+  final String credential;
   HubConnection? _hub;
 
   @override
   Future<void> connect(VoidCallback onMessage, VoidCallback onClose) async {
     final hub = HubConnectionBuilder()
         .withUrl(
-          '$chatServer/$path',
+          '$chatServer/direct',
           options: HttpConnectionOptions(
             transport: HttpTransportType.WebSockets,
             skipNegotiation: true,
-            accessTokenFactory: credential == null
-                ? null
-                : () async => credential!,
+            accessTokenFactory: () async => credential,
           ),
         )
         .build();
     _hub = hub;
     hub.on('MessagesAvailable', (_) => onMessage());
-    if (credential != null) hub.on('ContactsChanged', (_) => onMessage());
+    hub.on('ContactsChanged', (_) => onMessage());
     hub.onclose(({error}) => onClose());
     await hub.start()?.timeout(const Duration(seconds: 12));
   }
@@ -94,20 +90,7 @@ abstract class SignalRHistory implements HistoryTransport {
       /* The connection is already closing. */
     }
   }
-}
 
-class SignalRRoom extends SignalRHistory implements RoomTransport {
-  SignalRRoom() : super('chat');
-  @override
-  Future<void> send(String author, String token, String text) async {
-    await _connected
-        .invoke('SendMessage', args: [author, token, text])
-        .timeout(const Duration(seconds: 8));
-  }
-}
-
-class SignalRDirect extends SignalRHistory implements DirectTransport {
-  SignalRDirect(String credential) : super('direct', credential);
   Future<Object?> _request(String method, [List<Object>? args]) => _connected
       .invoke(method, args: args)
       .timeout(const Duration(seconds: 10));

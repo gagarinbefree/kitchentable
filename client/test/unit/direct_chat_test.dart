@@ -23,7 +23,7 @@ void main() {
     await online.future;
 
     transport.rows.add(
-      Message(17, '100002', 'hello', DateTime.utc(2026), recipient: 100001),
+      Message(17, 100002, 'hello', DateTime.utc(2026), recipient: 100001),
     );
     final inbox = container.read(directChatProvider.notifier);
     await inbox.refreshInbox();
@@ -43,7 +43,7 @@ void main() {
       'sentAt': '2026-11-26T10:30:00Z',
     });
     expect(message.id, 42);
-    expect(message.sender, '100001');
+    expect(message.sender, 100001);
     expect(message.recipient, 100002);
     expect(message.text, 'reply');
     expect(message.time.toUtc(), DateTime.utc(2026, 11, 26, 10, 30));

@@ -15,9 +15,18 @@ public class DirectDeliveryTests
     private static string Secret() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
     [Fact, Trait("Category", "Live")]
+    public async Task Former_public_hub_is_unavailable()
+    {
+        var direct = new Uri(Environment.GetEnvironmentVariable("CHAT_TEST_URL")!);
+        using var http = new HttpClient { BaseAddress = direct };
+        using var response = await http.PostAsync("/chat/negotiate?negotiateVersion=1", null);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact, Trait("Category", "Live")]
     public async Task Replaced_QR_is_invalid_and_only_one_concurrent_scanner_can_claim_its_replacement()
     {
-        var url = new Uri(new Uri(Environment.GetEnvironmentVariable("CHAT_TEST_URL")!), "/direct").ToString();
+        var url = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var ct = limit.Token;
         await using var owner = Connect(url, Secret());
@@ -44,21 +53,18 @@ public class DirectDeliveryTests
     [Fact, Trait("Category", "Live")]
     public async Task Direct_messages_and_notifications_are_visible_only_to_the_two_participants()
     {
-        var roomUrl = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
-        var directUrl = new Uri(new Uri(roomUrl), "/direct").ToString();
+        var directUrl = Environment.GetEnvironmentVariable("CHAT_TEST_URL")!;
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(50));
         var ct = limit.Token;
         var secret = Secret();
         await using var a = Connect(directUrl, secret);
         await using var b = Connect(directUrl, Secret());
         await using var c = Connect(directUrl, Secret());
-        await using var room = new HubConnectionBuilder().WithUrl(roomUrl).Build();
         var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var leaked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         b.On("MessagesAvailable", () => received.TrySetResult());
         c.On("MessagesAvailable", () => leaked.TrySetResult());
-        room.On("MessagesAvailable", () => leaked.TrySetResult());
-        await Task.WhenAll(a.StartAsync(ct), b.StartAsync(ct), c.StartAsync(ct), room.StartAsync(ct));
+        await Task.WhenAll(a.StartAsync(ct), b.StartAsync(ct), c.StartAsync(ct));
         var alice = await a.InvokeAsync<long>("MyNumber", ct);
         var bob = await b.InvokeAsync<long>("MyNumber", ct);
         Assert.NotEqual(alice, bob);
@@ -101,8 +107,6 @@ public class DirectDeliveryTests
         var missed = Assert.Single(await a.InvokeAsync<Row[]>("History", id, ct));
         Assert.Equal((reply, bob, alice), (missed.Id, missed.Sender, missed.Recipient));
         Assert.Empty(await c.InvokeAsync<Row[]>("History", 0L, ct));
-        var publicRows = await room.InvokeAsync<System.Text.Json.JsonElement[]>("History", 0L, ct);
-        Assert.DoesNotContain(publicRows, m => m.GetProperty("body").GetString() == body);
         Assert.False(leaked.Task.IsCompleted);
         await using var anonymous = new HubConnectionBuilder().WithUrl(directUrl).Build();
         var rejected = await Assert.ThrowsAsync<HttpRequestException>(() => anonymous.StartAsync(ct));
